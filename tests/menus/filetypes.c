@@ -1,6 +1,8 @@
 #include <stic.h>
 
 #include <stddef.h> /* NULL */
+#include <stdio.h> /* snprintf() */
+#include <string.h> /* strcpy() strstr() */
 
 #include <test-utils.h>
 
@@ -8,11 +10,13 @@
 #include "../../src/compat/fs_limits.h"
 #include "../../src/engine/keys.h"
 #include "../../src/engine/mode.h"
+#include "../../src/int/file_magic.h"
 #include "../../src/modes/cmdline.h"
 #include "../../src/modes/menu.h"
 #include "../../src/modes/modes.h"
 #include "../../src/modes/wk.h"
 #include "../../src/ui/ui.h"
+#include "../../src/utils/env.h"
 #include "../../src/utils/fs.h"
 #include "../../src/utils/str.h"
 #include "../../src/cmd_core.h"
@@ -21,10 +25,13 @@
 #include "../../src/status.h"
 
 static int fake_prog_exists(const char name[]);
+static int setup_desktop_test(void);
+static void teardown_desktop_test(void);
 static void setup_file_test(void);
 
 static line_stats_t *stats;
 static char cwd[PATH_MAX + 1];
+static char *saved_xdg_data_home;
 
 SETUP_ONCE()
 {
@@ -119,16 +126,10 @@ TEST(file_can_show_missing_entries)
 
 	assert_success(cmds_dispatch1("file", &lwin, CIT_COMMAND));
 
-	assert_true(menu_get_current()->len >= 3);
+	assert_int_equal(3, menu_get_current()->len);
 	assert_string_equal("          no-cat", menu_get_current()->items[0]);
 	assert_string_equal("[present] cat", menu_get_current()->items[1]);
 	assert_string_equal("          no-echo", menu_get_current()->items[2]);
-	if(menu_get_current()->len > 3)
-	{
-		assert_int_equal(4, menu_get_current()->len);
-		/* Separator. */
-		assert_string_equal("", menu_get_current()->items[3]);
-	}
 
 	(void)vle_keys_exec(WK_ESC);
 }
@@ -141,18 +142,68 @@ TEST(file_can_hide_missing_entries)
 
 	assert_success(cmds_dispatch1("file", &lwin, CIT_COMMAND));
 
-	assert_true(menu_get_current()->len >= 1);
+	assert_int_equal(1, menu_get_current()->len);
 	assert_string_equal("[present] cat", menu_get_current()->items[0]);
-	if(menu_get_current()->len > 1)
-	{
-		assert_int_equal(2, menu_get_current()->len);
-		/* Separator. */
-		assert_string_equal("", menu_get_current()->items[1]);
-	}
 
 	(void)vle_keys_exec(WK_ESC);
 
 	cfg.hide_missing_progs = 0;
+}
+
+TEST(separator_divides_filetype_and_desktop_handlers)
+{
+	if(!setup_desktop_test())
+	{
+		return;
+	}
+
+	assert_success(cmds_dispatch("filetype file.txt cat", &lwin, CIT_COMMAND));
+	assert_success(cmds_dispatch1("file", &lwin, CIT_COMMAND));
+	assert_true(vle_mode_is(MENU_MODE));
+
+	const menu_data_t *m = menu_get_current();
+	assert_true(m->len >= 3);
+	assert_true(starts_with_lit(m->items[0], "[present] "));
+	assert_true(ends_with(m->items[0], " cat"));
+	assert_string_equal("", m->items[1]);
+
+	int i;
+	int found = 0;
+	for(i = 2; i < m->len; ++i)
+	{
+		assert_false(m->items[i][0] == '\0');
+		found |= (strstr(m->items[i], "desktop-prog") != NULL);
+	}
+	assert_true(found);
+
+	(void)vle_keys_exec(WK_ESC);
+	teardown_desktop_test();
+}
+
+TEST(no_leading_separator_for_only_desktop_handlers)
+{
+	if(!setup_desktop_test())
+	{
+		return;
+	}
+
+	assert_success(cmds_dispatch1("file", &lwin, CIT_COMMAND));
+	assert_true(vle_mode_is(MENU_MODE));
+
+	const menu_data_t *m = menu_get_current();
+	assert_true(m->len >= 1);
+
+	int i;
+	int found = 0;
+	for(i = 0; i < m->len; ++i)
+	{
+		assert_false(m->items[i][0] == '\0');
+		found |= (strstr(m->items[i], "desktop-prog") != NULL);
+	}
+	assert_true(found);
+
+	(void)vle_keys_exec(WK_ESC);
+	teardown_desktop_test();
 }
 
 TEST(pseudo_entry_is_always_present_for_directories)
@@ -218,6 +269,64 @@ setup_file_test(void)
 	assert_success(cmds_dispatch("filetype test-file cat", &lwin, CIT_COMMAND));
 	assert_success(cmds_dispatch("filetype test-file no-echo", &lwin,
 				CIT_COMMAND));
+}
+
+/* Makes a text file the current entry and a .desktop file handling its mime
+ * type.  Returns non-zero on success and zero if mime type can't be detected
+ * or desktop files aren't supported, in which case test should be skipped. */
+static int
+setup_desktop_test(void)
+{
+#ifndef ENABLE_DESKTOP_FILES
+	return 0;
+#else
+	create_dir(SANDBOX_PATH "/files");
+	make_file(SANDBOX_PATH "/files/file.txt", "some text\n");
+
+	const char *mime = get_mimetype(SANDBOX_PATH "/files/file.txt", 0);
+	if(mime == NULL)
+	{
+		remove_file(SANDBOX_PATH "/files/file.txt");
+		remove_dir(SANDBOX_PATH "/files");
+		return 0;
+	}
+
+	char desktop[256];
+	snprintf(desktop, sizeof(desktop),
+			"[Desktop Entry]\nName=DesktopProg\nExec=desktop-prog %%f\n"
+			"MimeType=%s;\n", mime);
+
+	create_dir(SANDBOX_PATH "/data");
+	create_dir(SANDBOX_PATH "/data/applications");
+	make_file(SANDBOX_PATH "/data/applications/vifm-test.desktop", desktop);
+	update_string(&saved_xdg_data_home, env_get("XDG_DATA_HOME"));
+	env_set("XDG_DATA_HOME", SANDBOX_PATH "/data");
+
+	strcpy(lwin.curr_dir, SANDBOX_PATH "/files");
+	populate_dir_list(&lwin, 0);
+	lwin.list_pos = 0;
+	assert_string_equal("file.txt", get_current_entry(&lwin)->name);
+	return 1;
+#endif
+}
+
+static void
+teardown_desktop_test(void)
+{
+	if(saved_xdg_data_home == NULL)
+	{
+		env_remove("XDG_DATA_HOME");
+	}
+	else
+	{
+		env_set("XDG_DATA_HOME", saved_xdg_data_home);
+		update_string(&saved_xdg_data_home, NULL);
+	}
+	remove_file(SANDBOX_PATH "/data/applications/vifm-test.desktop");
+	remove_dir(SANDBOX_PATH "/data/applications");
+	remove_dir(SANDBOX_PATH "/data");
+	remove_file(SANDBOX_PATH "/files/file.txt");
+	remove_dir(SANDBOX_PATH "/files");
 }
 
 /* vim: set tabstop=2 softtabstop=2 shiftwidth=2 noexpandtab cinoptions-=(0 : */
