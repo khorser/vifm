@@ -1379,7 +1379,8 @@ win_shortcut_read(const char shortcut[], char buf[], int buf_len)
 		if(SUCCEEDED(hres))
 		{
 			wchar_t target[PATH_MAX + 1];
-			hres = shlink->lpVtbl->GetPath(shlink, target, sizeof(target), NULL, 0);
+			hres = shlink->lpVtbl->GetPath(shlink, target, ARRAY_LEN(target), NULL,
+					0);
 
 			if(hres == S_OK)
 			{
