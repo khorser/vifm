@@ -965,6 +965,7 @@ init_line_stats(line_stats_t *stat, const wchar_t prompt[],
 	}
 
 	wcsncpy(stat->prompt, prompt, ARRAY_LEN(stat->prompt));
+	stat->prompt[ARRAY_LEN(stat->prompt) - 1] = L'\0';
 	stat->prompt_wid = esc_wcswidth(stat->prompt, (size_t)-1);
 	stat->curs_pos += stat->prompt_wid;
 }

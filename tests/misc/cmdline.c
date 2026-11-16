@@ -1,5 +1,8 @@
 #include <stic.h>
 
+#include <string.h> /* memset() */
+#include <wchar.h> /* wcslen() */
+
 #include <test-utils.h>
 
 #include "../../src/cfg/config.h"
@@ -13,6 +16,7 @@
 #include "../../src/ui/column_view.h"
 #include "../../src/ui/statusbar.h"
 #include "../../src/ui/ui.h"
+#include "../../src/utils/macros.h"
 #include "../../src/utils/matcher.h"
 #include "../../src/utils/path.h"
 #include "../../src/utils/str.h"
@@ -106,6 +110,19 @@ TEST(prompt_cb_is_called_on_cancellation)
 
 	assert_string_equal(NULL, prompt_response);
 	assert_int_equal(1, prompt_invocation_count);
+}
+
+TEST(too_long_prompt_is_truncated)
+{
+	char prompt[ARRAY_LEN(stats->prompt) + 10];
+	memset(prompt, 'x', sizeof(prompt) - 1);
+	prompt[sizeof(prompt) - 1] = '\0';
+
+	modcline_prompt(prompt, "", &prompt_callback, /*cb_arg=*/NULL,
+			/*complete=*/NULL);
+	assert_true(vle_mode_is(CMDLINE_MODE));
+	assert_int_equal(ARRAY_LEN(stats->prompt) - 1, wcslen(stats->prompt));
+	(void)vle_keys_exec_timed_out(WK_C_c);
 }
 
 TEST(user_prompt_accepts_input)
