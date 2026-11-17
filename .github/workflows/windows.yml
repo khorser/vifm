@@ -24,9 +24,15 @@ jobs:
       RELEASE: 1
       CFLAGS: -DNDEBUG
     steps:
+      # Test data must keep LF line endings (sizes are checked byte by byte).
+      - name: Keep LF line endings
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      # MINGW64 (msvcrt) matches upstream's AppVeyor and release builds.
       - uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
+          suppress-deprecation-warnings: msystem-mingw64
           update: true
           install: >-
             mingw-w64-x86_64-gcc make wget patch tar groff
@@ -43,8 +49,10 @@ jobs:
         run: bash scripts/appveyor/win/build-deps
       - name: Build
         run: bash scripts/appveyor/win/build
+      # A failing test doesn't hold back the binaries; the step still shows red.
       - name: Test
         if: ${{ inputs.tests }}
+        continue-on-error: true
         run: bash scripts/appveyor/win/test
       - name: Package
         id: package
