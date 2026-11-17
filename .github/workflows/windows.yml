@@ -1,0 +1,62 @@
+# Fork-only: builds Windows binaries of any branch on demand, using the same
+# scripts as upstream's AppVeyor job.  Run with:
+#   gh workflow run windows.yml -R khorser/vifm -f ref=<branch>
+name: windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to build
+        default: master
+      tests:
+        description: Run the test suite
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      RELEASE: 1
+      CFLAGS: -DNDEBUG
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc make wget patch tar groff
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            src/PDCurses-3.8
+            src/mingw-libgnurx-2.5.1
+          key: win-deps-${{ hashFiles('patches/pdcurses38/*', 'scripts/appveyor/win/build-deps') }}
+      - name: Dependencies
+        run: bash scripts/appveyor/win/build-deps
+      - name: Build
+        run: bash scripts/appveyor/win/build
+      - name: Test
+        if: ${{ inputs.tests }}
+        run: bash scripts/appveyor/win/test
+      - name: Package
+        id: package
+        run: |
+          out=vifm-w64-$(git rev-parse --short HEAD)
+          mkdir "$out"
+          cp src/vifm.exe src/win_helper.exe src/mingw-libgnurx-2.5.1/*.dll "$out/"
+          ldd src/vifm.exe src/win_helper.exe | awk '$3 ~ /^\/mingw64\// { print $3 }' |
+              sort -u | xargs -r cp -t "$out/"
+          ls -l "$out"
+          echo "name=$out" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: ${{ steps.package.outputs.name }}
