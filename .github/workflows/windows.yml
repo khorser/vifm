@@ -35,7 +35,7 @@ jobs:
           suppress-deprecation-warnings: msystem-mingw64
           update: true
           install: >-
-            mingw-w64-x86_64-gcc make wget patch tar groff
+            mingw-w64-x86_64-gcc make wget patch tar groff git
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
