@@ -37,7 +37,7 @@ FileMonType;
 /* Storage for file monitoring information. */
 typedef struct
 {
-#ifdef HAVE_STRUCT_STAT_ST_MTIM
+#if defined(HAVE_STRUCT_STAT_ST_MTIM) || defined(HAVE_STRUCT_STAT_ST_MTIMESPEC)
 	struct timespec ts;
 #else
 	time_t ts;

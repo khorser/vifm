@@ -1,5 +1,9 @@
 #include <stic.h>
 
+#ifndef _WIN32
+#include <sys/time.h> /* timeval utimes() */
+#endif
+
 #include <stdio.h> /* FILE fclose() fopen() */
 
 #include <test-utils.h>
@@ -81,6 +85,34 @@ TEST(modification_is_detected)
 
 	assert_false(filemon_equal(&mon1, &mon2));
 }
+
+#if !defined(_WIN32) && \
+    (defined(HAVE_STRUCT_STAT_ST_MTIM) || defined(HAVE_STRUCT_STAT_ST_MTIMESPEC))
+
+TEST(subsecond_modification_is_detected)
+{
+	FILE *f = fopen(SANDBOX_PATH "/file", "w");
+	fclose(f);
+
+	struct timeval tvs[2] = { { 1000, 100000 }, { 1000, 100000 } };
+	assert_success(utimes(SANDBOX_PATH "/file", tvs));
+
+	filemon_t mon1;
+	filemon_from_file(SANDBOX_PATH "/file", FMT_MODIFIED, &mon1);
+
+	/* Same second, different fraction. */
+	tvs[1].tv_usec = 200000;
+	assert_success(utimes(SANDBOX_PATH "/file", tvs));
+
+	filemon_t mon2;
+	filemon_from_file(SANDBOX_PATH "/file", FMT_MODIFIED, &mon2);
+
+	assert_false(filemon_equal(&mon1, &mon2));
+
+	assert_success(remove(SANDBOX_PATH "/file"));
+}
+
+#endif
 
 TEST(failed_read_from_file_resets_filemon)
 {

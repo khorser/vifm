@@ -59,6 +59,16 @@ filemon_from_file(const char path[], FileMonType type, filemon_t *timestamp)
 	{
 		memcpy(&timestamp->ts, &s.st_ctim, sizeof(s.st_ctim));
 	}
+#elif defined(HAVE_STRUCT_STAT_ST_MTIMESPEC)
+	/* macOS and some BSDs name nanosecond timestamps differently. */
+	if(type == FMT_MODIFIED)
+	{
+		memcpy(&timestamp->ts, &s.st_mtimespec, sizeof(s.st_mtimespec));
+	}
+	else
+	{
+		memcpy(&timestamp->ts, &s.st_ctimespec, sizeof(s.st_ctimespec));
+	}
 #else
 	if(type == FMT_MODIFIED)
 	{
